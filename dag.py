@@ -1,199 +1,226 @@
-# bees_breweries_daily.py
-# DAG única com seções. Nesta entrega: ##### BRONZE #####
-# Requisitos: google-cloud-storage, google-cloud-bigquery, pandas, pyarrow, requests, gcsfs
+# dag.py — BEES Breweries (Bronze → Silver → Gold) — Single DAG
+# Airflow 2.9+/2.10 (Composer 3)
+from __future__ import annotations
 
+import hashlib
+import json
+import logging
+import time
 from datetime import datetime, timedelta
-import hashlib, json, time, logging
-import requests
 
 from airflow import DAG
-from airflow.operators.python import PythonOperator, ShortCircuitOperator
 from airflow.models import Variable
+from airflow.operators.python import PythonOperator, ShortCircuitOperator
 
-from google.cloud import storage, bigquery
+# ============================================================================
+# Config (override via Admin → Variables if needed)
+# ============================================================================
+PROJECT_ID = Variable.get("GCP_PROJECT_ID", default_var="case-abinbev-469918")
+DATASET    = Variable.get("BQ_DATASET",     default_var="Medallion")
 
-# ------------------------------ Config ---------------------------------
-# Pegamos de Airflow Variables (com defaults que batem no seu projeto/bucket)
-PROJECT_ID   = Variable.get("GCP_PROJECT_ID", default_var="case-abinbev-469918")
-BUCKET_DATA  = Variable.get("BUCKET_NAME",    default_var="bucket-case-abinbev")
-DATASET      = Variable.get("BQ_DATASET",     default_var="Medallion")
+# Use the Composer environment bucket for data/logs by default:
+BUCKET_DATA         = Variable.get(
+    "BUCKET_NAME",
+    default_var="us-central1-composer-case-165cfec3-bucket",
+)
+COMPOSER_LOG_BUCKET = Variable.get("COMPOSER_LOG_BUCKET", default_var=BUCKET_DATA)
 
-# Opcional: bucket de logs do Composer (se quiser salvar um .log adicional)
-COMPOSER_LOG_BUCKET = Variable.get("COMPOSER_LOG_BUCKET", default_var="")
+# Paths/prefixes
+DATA_PREFIX  = "data"
+BRONZE_DIR   = f"{DATA_PREFIX}/bronze"
+SILVER_DIR   = f"{DATA_PREFIX}/silver"
+GOLD_DIR     = f"{DATA_PREFIX}/gold"
+CONTROL_BLOB = f"{BRONZE_DIR}/_control/last_sha256.txt"   # hash control file
 
-API_URL = "https://api.openbrewerydb.org/v1/breweries"
-PER_PAGE = 200  # máximo suportado
-# -----------------------------------------------------------------------
+# API (iterate pages until exhausted)
+API_URL   = "https://api.openbrewerydb.org/v1/breweries"
+PER_PAGE  = 200  # API maximum
+TIMEOUT_S = 30
+
+# DAG params
+SCHEDULE     = "@daily"            # run daily; you can always trigger manually
+START_DATE   = datetime(2024, 1, 1)
+RETRIES      = 3
+RETRY_DELAY  = timedelta(minutes=2)
+
+# ============================================================================
+# Helpers
+# ============================================================================
 
 def _save_log(lines: list[str]) -> None:
-    """Salva um log .log no bucket do Composer (opcional)."""
-    if not COMPOSER_LOG_BUCKET:
-        for ln in lines: logging.info(ln)
-        return
-    storage.Client().bucket(COMPOSER_LOG_BUCKET)\
-        .blob(f'logs/bronze_dag_log_{datetime.utcnow().strftime("%Y%m%d%H%M%S")}.log')\
-        .upload_from_string("\n".join(lines), content_type="text/plain; charset=utf-8")
+    """Append a run log into GCS (UTF-8)."""
+    from google.cloud import storage
+    content = "\n".join(lines) + "\n"
+    ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    blob_path = f"logs/bronze_dag_log_{ts}.log"
+    storage.Client().bucket(COMPOSER_LOG_BUCKET).blob(blob_path).upload_from_string(
+        content, content_type="text/plain; charset=utf-8"
+    )
+    logging.info("Log written to gs://%s/%s", COMPOSER_LOG_BUCKET, blob_path)
+
+
+def _read_last_hash(storage_client) -> str | None:
+    try:
+        return (
+            storage_client.bucket(BUCKET_DATA)
+            .blob(CONTROL_BLOB)
+            .download_as_text(encoding="utf-8")
+            .strip()
+        )
+    except Exception:
+        return None
+
+
+def _write_last_hash(storage_client, value: str) -> None:
+    storage_client.bucket(BUCKET_DATA).blob(CONTROL_BLOB).upload_from_string(
+        value + "\n", content_type="text/plain; charset=utf-8"
+    )
+
 
 def _http_get(params: dict, attempt: int):
-    r = requests.get(API_URL, params=params, timeout=30, headers={"User-Agent":"bees-breweries/1.0"})
+    import requests
+    headers = {"User-Agent": "bees-breweries/1.0"}
+    r = requests.get(API_URL, params=params, headers=headers, timeout=TIMEOUT_S)
     if r.status_code in (429, 500, 502, 503, 504):
-        backoff = min(60, 2 ** attempt) + 0.1 * attempt
+        backoff = min(60, 2**attempt) + 0.1 * attempt
         logging.warning("HTTP %s, retrying in %.1fs...", r.status_code, backoff)
         time.sleep(backoff)
     r.raise_for_status()
     return r
 
-# ============================ ##### BRONZE ##### ============================
 
-def bronze_extract_and_gate(ds, dag_run, ti, **_):
+def _upload_page_jsonl(storage_client, bucket: str, path: str, rows: list[dict]) -> bytes:
     """
-    Baixa TODOS os dados paginados, grava NDJSON por página em GCS e calcula
-    um hash do dataset. Se o hash mudou (ou se force==true), retorna True
-    (libera as próximas etapas). Caso contrário, retorna False (ShortCircuit).
+    Write one NDJSON page (true UTF-8). Returns the exact bytes written
+    so we can compose a stable SHA256 across the whole run.
     """
-    run_date = ds  # YYYY-MM-DD
-    gcs = storage.Client(); bkt = gcs.bucket(BUCKET_DATA)
-    prefix = f"data/bronze/run_date={run_date}"
+    jsonl_bytes = b"".join(
+        (json.dumps(r, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+        for r in rows
+    )
+    storage_client.bucket(bucket).blob(path).upload_from_string(
+        jsonl_bytes, content_type="application/x-ndjson; charset=utf-8"
+    )
+    return jsonl_bytes
 
-    # paginação
-    page, total = 1, 0
-    hasher = hashlib.sha256()
-    log = [f"Start Bronze -> {API_URL}", f"GCS prefix: gs://{BUCKET_DATA}/{prefix}"]
+
+# ============================================================================
+# BRONZE
+# ============================================================================
+
+def bronze_extract_and_gate(ds: str, **context) -> bool:
+    """
+    Fetch ALL pages (pagination) and store NDJSON into:
+      gs://<bucket>/data/bronze/run_date=YYYY-MM-DD/page=00001.jsonl
+    Compute SHA256 over the stored bytes and compare with last control hash.
+    If changed (or conf {"force": true}), return True → downstream runs.
+    """
+    from google.cloud import storage
+
+    conf = context.get("dag_run").conf or {}
+    force = bool(conf.get("force"))
+
+    sc = storage.Client()
+    total_rows = 0
+    total_pages = 0
+    sha = hashlib.sha256()
+
+    page = 1
+    logs = []
 
     while True:
-        params = {"per_page": PER_PAGE, "page": page}
-        resp = _http_get(params, attempt=page)
-        rows = resp.json()
-        if not rows:
+        params = {"page": page, "per_page": PER_PAGE}
+        resp = _http_get(params, attempt=page)  # attempt used for backoff variability
+        data = resp.json()
+        if not data:
             break
 
-        # grava uma página em NDJSON
-        ndjson = "\n".join(json.dumps(x, ensure_ascii=False) for x in rows)
-        bkt.blob(f"{prefix}/page={page:05d}.jsonl").upload_from_string(
-            ndjson, content_type="application/x-ndjson"
-        )
+        page_path = f"{BRONZE_DIR}/run_date={ds}/page={page:05d}.jsonl"
+        page_bytes = _upload_page_jsonl(sc, BUCKET_DATA, page_path, data)
+        sha.update(page_bytes)
 
-        # hash estável pelo id (ordem-independente)
-        for _id in sorted(str(x.get("id", "")) for x in rows):
-            hasher.update(_id.encode())
+        total_pages += 1
+        total_rows += len(data)
+        logging.info("Saved page %05d (%d rows)", page, len(data))
+        logs.append(f"Saved page {page:05d} ({len(data)} rows) → gs://{BUCKET_DATA}/{page_path}")
 
-        total += len(rows)
-        log.append(f"Saved page {page:05d} ({len(rows)} rows)")
+        if len(data) < PER_PAGE:
+            break
         page += 1
-        if len(rows) < PER_PAGE:
-            break
-        time.sleep(0.2)  # respeita API
 
-    dataset_sha = hasher.hexdigest()
-    log.append(f"Total pages: {page-1} | rows: {total} | sha256: {dataset_sha}")
+    current_hash = sha.hexdigest()
+    prev_hash = _read_last_hash(sc)
 
-    # grava métricas e o hash do dataset dessa execução
-    bkt.blob(f"{prefix}/_metrics.json").upload_from_string(
-        json.dumps({"pages": page-1, "rows": total, "sha256": dataset_sha}),
-        content_type="application/json"
-    )
-    bkt.blob(f"{prefix}/_dataset_sha256.txt").upload_from_string(dataset_sha, content_type="text/plain")
+    logs.append(f"Total pages: {total_pages} | rows: {total_rows} | sha256: {current_hash}")
+    logs.append(f"Previous hash: {prev_hash or '(none)'}")
 
-    # compara com o último hash processado
-    ctl_blob = bkt.blob("data/bronze/last_update.txt")
-    last = ctl_blob.download_as_text().strip() if ctl_blob.exists() else ""
-    changed = (dataset_sha != last)
-
-    # permite forçar via Trigger DAG → conf {"force": true}
-    force = bool((dag_run.conf or {}).get("force"))
-
-    if changed or force:
-        ctl_blob.upload_from_string(dataset_sha, content_type="text/plain")
-        log.append("Change detected (or forced). Downstream will run.")
-        ti.xcom_push(key="bronze_changed", value=True)
-        _save_log(log)
-        return True
+    changed = force or (current_hash != prev_hash)
+    if changed:
+        _write_last_hash(sc, current_hash)
+        logs.append("Change detected (or force=true) → continue.")
     else:
-        log.append("No change detected. Downstream will be skipped.")
-        ti.xcom_push(key="bronze_changed", value=False)
-        _save_log(log)
-        return False
+        logs.append("No change → skip downstream.")
+
+    _save_log(logs)
+    return changed
 
 
-def bronze_load_to_bigquery(ds, **_):
+def bronze_load_to_bigquery(ds: str, **_):
     """
-    Carrega o BRONZE (raw) da execução (run_date=ds) para a tabela
-    case-abinbev-469918.Medallion.bronze em formato JSONL (WRITE_TRUNCATE).
+    Load BRONZE NDJSON into BigQuery table Medallion.bronze.
     """
+    from google.cloud import bigquery
+
     client = bigquery.Client(project=PROJECT_ID)
-    # garante dataset e tabela
-    try:
-        client.get_dataset(DATASET)
-    except Exception:
-        client.create_dataset(bigquery.Dataset(f"{PROJECT_ID}.{DATASET}"))
+    uri = f"gs://{BUCKET_DATA}/{BRONZE_DIR}/run_date={ds}/page=*.jsonl"
 
-    client.query(f"""
-      CREATE TABLE IF NOT EXISTS `{PROJECT_ID}.{DATASET}.bronze` (
-        id STRING, name STRING, brewery_type STRING,
-        address_1 STRING, address_2 STRING, address_3 STRING,
-        city STRING, state_province STRING, postal_code STRING, country STRING,
-        longitude STRING, latitude STRING, phone STRING, website_url STRING,
-        state STRING, street STRING
-      )
-    """).result()
+    schema = [
+        bigquery.SchemaField("id", "STRING"),
+        bigquery.SchemaField("name", "STRING"),
+        bigquery.SchemaField("brewery_type", "STRING"),
+        bigquery.SchemaField("address_1", "STRING"),
+        bigquery.SchemaField("address_2", "STRING"),
+        bigquery.SchemaField("address_3", "STRING"),
+        bigquery.SchemaField("city", "STRING"),
+        bigquery.SchemaField("state_province", "STRING"),
+        bigquery.SchemaField("postal_code", "STRING"),
+        bigquery.SchemaField("country", "STRING"),
+        bigquery.SchemaField("longitude", "STRING"),
+        bigquery.SchemaField("latitude", "STRING"),
+        bigquery.SchemaField("phone", "STRING"),
+        bigquery.SchemaField("website_url", "STRING"),
+        bigquery.SchemaField("state", "STRING"),
+        bigquery.SchemaField("street", "STRING"),
+    ]
 
-    uri = f"gs://{BUCKET_DATA}/data/bronze/run_date={ds}/page=*.jsonl"
+    table_id = f"{PROJECT_ID}.{DATASET}.bronze"
     job_config = bigquery.LoadJobConfig(
+        schema=schema,
         source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
         write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
-    )
-    client.load_table_from_uri(
-        uri, f"{PROJECT_ID}.{DATASET}.bronze", job_config=job_config
-    ).result()
-
-# ========================== ##### /BRONZE ##### ============================
-
-default_args = dict(
-    owner="data-eng",
-    retries=2,
-    retry_delay=timedelta(minutes=5),
-    email_on_failure=True,
-)
-
-with DAG(
-    dag_id="bees_breweries_daily",
-    description="Open Brewery DB → Medallion (Bronze/Silver/Gold) — Parte 1: Bronze",
-    start_date=datetime(2024, 1, 1),
-    schedule_interval="@daily",
-    catchup=False,
-    default_args=default_args,
-    tags=["bees","medallion","bronze"],
-) as dag:
-
-    # ##### BRONZE ########################################################
-    extract_and_gate = ShortCircuitOperator(
-        task_id="bronze_extract_and_gate",
-        python_callable=bronze_extract_and_gate,
+        autodetect=False,
     )
 
-    load_bronze = PythonOperator(
-        task_id="bronze_load_to_bigquery",
-        python_callable=bronze_load_to_bigquery,
-        op_kwargs={"ds": "{{ ds }}"},
-    )
+    load_job = client.load_table_from_uri(uri, table_id, job_config=job_config)
+    load_job.result()
 
-    extract_and_gate >> load_bronze
+    dest = client.get_table(table_id)
+    logging.info("Bronze loaded: %s (%s rows)", table_id, dest.num_rows)
 
-    # ##### SILVER ########################################################
-# ============================ ##### SILVER ##### ============================
 
-def silver_transform_and_save_parquet(ds, **_):
+# ============================================================================
+# SILVER
+# ============================================================================
+
+def silver_transform_and_save_parquet(ds: str, **_):
     """
-    Transforma o BRONZE em SILVER:
-    - normaliza tipos (longitude/latitude -> FLOAT64)
-    - padrões de limpeza (trim/LOWER onde útil)
-    - gera 'state_partition' (0..50) para particionamento
-    - grava tabela particionada/clusterizada no BigQuery
-    - exporta uma cópia em Parquet para o GCS (silver)
+    Create/refresh the SILVER table (integer-range partition + clustering),
+    then export a Parquet copy to GCS.
     """
+    from google.cloud import bigquery
+
     bq = bigquery.Client(project=PROJECT_ID)
 
-    # 1) Cria/atualiza a tabela particionada/clusterizada direto via SQL
     sql = f"""
     CREATE OR REPLACE TABLE `{PROJECT_ID}.{DATASET}.silver`
     PARTITION BY RANGE_BUCKET(state_partition, GENERATE_ARRAY(0, 50, 1))
@@ -221,42 +248,29 @@ def silver_transform_and_save_parquet(ds, **_):
     """
     bq.query(sql).result()
 
-    # 2) Exporta uma cópia em Parquet para o GCS (colunar)
-    query = f"SELECT * FROM `{PROJECT_ID}.{DATASET}.silver`"
-    df = bq.query(query).result().to_dataframe(create_bqstorage_client=True)
-    path_parquet = f"gs://{BUCKET_DATA}/data/silver/breweries_transformed/breweries_transformed.parquet"
-    df.to_parquet(path_parquet, index=False)  # gcsfs/pyarrow cuidam do GCS
+    # Export a Parquet copy (handy for debugging/external consumption)
+    df = bq.query(f"SELECT * FROM `{PROJECT_ID}.{DATASET}.silver`") \
+            .result().to_dataframe(create_bqstorage_client=True)
+    path_parquet = f"gs://{BUCKET_DATA}/{SILVER_DIR}/breweries_transformed/breweries_transformed.parquet"
+    df.to_parquet(path_parquet, index=False)  # gcsfs/pyarrow handle GCS I/O
 
     _save_log([
-        "Silver: tabela particionada/clusterizada criada/atualizada.",
-        f"Silver Parquet salvo em: {path_parquet}",
-        f"Linhas no Silver: {len(df)}",
+        "Silver: partitioned & clustered table created/updated.",
+        f"Silver Parquet: {path_parquet}",
+        f"Silver rows: {len(df)}",
     ])
 
-# ---------------------------------------------------------------------------
 
-silver_build = PythonOperator(
-    task_id="silver_transform_and_save_parquet",
-    python_callable=silver_transform_and_save_parquet,
-    op_kwargs={"ds": "{{ ds }}"},
-)
+# ============================================================================
+# GOLD
+# ============================================================================
 
-# encadeamento (o Bronze já tem o ShortCircuit na frente)
-load_bronze >> silver_build
-
-# ========================== ##### /SILVER ##### ============================
-    
-
-# ##### GOLD ##########################################################
-# ============================ ##### GOLD ##### ============================
-
-def gold_aggregate_and_save(ds, **_):
+def gold_aggregate_and_save(ds: str, **_):
     """
-    Agrega o SILVER em GOLD:
-    - COUNT(*) por country/state/brewery_type
-    - tabela clusterizada no BigQuery
-    - exporta Parquet no GCS (opcional)
+    Aggregate SILVER into GOLD and export a Parquet snapshot to GCS.
     """
+    from google.cloud import bigquery
+
     bq = bigquery.Client(project=PROJECT_ID)
 
     sql = f"""
@@ -272,26 +286,60 @@ def gold_aggregate_and_save(ds, **_):
     """
     bq.query(sql).result()
 
-    # Exporta uma cópia colunar (útil pra debug/consumo externo)
     df = bq.query(f"SELECT * FROM `{PROJECT_ID}.{DATASET}.gold`") \
-           .result().to_dataframe(create_bqstorage_client=True)
-    path_parquet = f"gs://{BUCKET_DATA}/data/gold/breweries_aggregated.parquet"
+            .result().to_dataframe(create_bqstorage_client=True)
+    path_parquet = f"gs://{BUCKET_DATA}/{GOLD_DIR}/breweries_aggregated.parquet"
     df.to_parquet(path_parquet, index=False)
 
     _save_log([
-        "Gold: agregado criado/atualizado.",
-        f"Gold Parquet salvo em: {path_parquet}",
-        f"Linhas no Gold: {len(df)}",
+        "Gold: aggregated table created/updated.",
+        f"Gold Parquet: {path_parquet}",
+        f"Gold rows: {len(df)}",
     ])
 
-gold_build = PythonOperator(
-    task_id="gold_aggregate_and_save",
-    python_callable=gold_aggregate_and_save,
-    op_kwargs={"ds": "{{ ds }}"},
-)
 
-# encadeamento final
-silver_build >> gold_build
+# ============================================================================
+# DAG definition
+# ============================================================================
 
-# ========================== ##### /GOLD ##### ============================
+with DAG(
+    dag_id="bees_breweries_daily",
+    description="Open Brewery DB → Medallion (Bronze/Silver/Gold) with pagination, UTF-8, hash control & logs",
+    start_date=START_DATE,
+    schedule_interval=SCHEDULE,
+    catchup=False,
+    default_args={
+        "owner": "airflow",
+        "retries": RETRIES,
+        "retry_delay": RETRY_DELAY,
+    },
+    max_active_runs=1,
+    tags=["bees", "medallion", "openbrewerydb"],
+) as dag:
 
+    bronze_extract_and_gate_task = ShortCircuitOperator(
+        task_id="bronze_extract_and_gate",
+        python_callable=bronze_extract_and_gate,
+        op_kwargs={"ds": "{{ ds }}"},
+    )
+
+    bronze_load_task = PythonOperator(
+        task_id="bronze_load_to_bigquery",
+        python_callable=bronze_load_to_bigquery,
+        op_kwargs={"ds": "{{ ds }}"},
+    )
+
+    silver_task = PythonOperator(
+        task_id="silver_transform_and_save_parquet",
+        python_callable=silver_transform_and_save_parquet,
+        op_kwargs={"ds": "{{ ds }}"},
+    )
+
+    gold_task = PythonOperator(
+        task_id="gold_aggregate_and_save",
+        python_callable=gold_aggregate_and_save,
+        op_kwargs={"ds": "{{ ds }}"},
+    )
+
+    # If Bronze returns False (no change), downstream tasks are skipped
+    bronze_extract_and_gate_task >> bronze_load_task >> silver_task >> gold_task
