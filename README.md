@@ -62,10 +62,10 @@ Airflow Variable: bees_force=true (then trigger normally).
 
 Incremental loading: downstream stages run only when data changes, saving cost and time.
 
-## Reliability: 
+### Reliability: 
 API calls use timeouts; Airflow handles retries and task-level error handling.
 
-## Observability: 
+### Observability: 
 Each stage writes a concise log to GCS with page/row counts, hash values, and outcomes (“changed”/“no change”)
 
 
@@ -111,12 +111,13 @@ Trigger with run config {"force": true}.
 
 # Big Query Interface:
 
-case-abinbev-469918.Medallion.bronze
-
+**Bronze**
 Schema mirrors the API payload (STRING fields for raw text):
 id, name, brewery_type, address_1, address_2, address_3, city, state_province, postal_code, country, longitude, latitude, phone, website_url, state, street.
 
-Silver (Clean/Normalize → Parquet → BigQuery)
+**Silver** 
+
+Clean/Normalize → Parquet → BigQuery
 
 Reads Bronze from BigQuery and applies text repairs to fix known mojibake issues from the source (e.g., Caf�→Café, Stra�e→Straße, K�rnten→Kärnten, Nieder�sterreich→Niederösterreich, W�rthersee→Wörthersee, Wimitzbr�u→Wimitzbräu).
 These are hard-coded in the DAG so the analytical layer is clean even if the API returns broken characters.
@@ -125,6 +126,9 @@ Normalizes Unicode to NFC, casts longitude/latitude to FLOAT64.
 
 Creates state_partition (deterministic integer) for range partitioning.
 
+**Gold**
+
+Aggregation and final summary of info
 
 # DDL
 
@@ -133,7 +137,7 @@ Creates state_partition (deterministic integer) for range partitioning.
 CREATE SCHEMA IF NOT EXISTS `case-abinbev-469918.Medallion`;
 
 ### BRONZE
-
+```sql
 CREATE TABLE IF NOT EXISTS `case-abinbev-469918.Medallion.bronze` (
   id            STRING,
   name          STRING,
@@ -152,6 +156,7 @@ CREATE TABLE IF NOT EXISTS `case-abinbev-469918.Medallion.bronze` (
   state         STRING,
   street        STRING
 );
+```
 
 ### SILVER
 
@@ -178,7 +183,7 @@ PARTITION BY RANGE_BUCKET(state_partition, GENERATE_ARRAY(0, 50, 1))
 CLUSTER BY country, city;
 
 ### GOLD
-
+```sql
 CREATE TABLE IF NOT EXISTS `case-abinbev-469918.Medallion.gold` (
   country         STRING,  -- Country name (from Silver)
   state           STRING,  -- State/Province (from Silver)
@@ -186,6 +191,7 @@ CREATE TABLE IF NOT EXISTS `case-abinbev-469918.Medallion.gold` (
   total_breweries INT64    -- Aggregated count
 )
 CLUSTER BY country, state, brewery_type;
+```
 
 **Columns**
 
@@ -200,6 +206,7 @@ total_breweries (INT64): Count of rows per (country, state, brewery_type).
 **Populated by**
 
 -- Conceptual aggregation used by the pipeline:
+```sql
 SELECT
   country,
   state,
@@ -207,13 +214,14 @@ SELECT
   COUNT(*) AS total_breweries
 FROM `case-abinbev-469918.Medallion.silver`
 GROUP BY 1,2,3;
+```
 
 ### Gold Sample
-
+```sql
 SELECT country, state, brewery_type, total_breweries
 FROM `case-abinbev-469918.Medallion.gold`
 ORDER BY country, state, brewery_type;
-
+```
 
 # How to deploy & run
 
@@ -228,13 +236,16 @@ ORDER BY country, state, brewery_type;
 ```bash
 gcloud composer environments run composer-case --location=us-central1 \
   dags trigger -- bees_breweries_daily --conf='{"force": true}'
+```
 
 Force full rebuild (alternative)
 
 In Airflow → Admin → Variables set bees_force=true and trigger normally.
 
 To reset the change gate:
+```powershell
 gsutil rm -f gs://us-central1-composer-case-165cfec3-bucket/control/bronze_sha256.txt
+```
 
 # Validation queries
 
@@ -243,6 +254,84 @@ gsutil rm -f gs://us-central1-composer-case-165cfec3-bucket/control/bronze_sha25
 SELECT 'bronze' AS tbl, COUNT(*) FROM `case-abinbev-469918.Medallion.bronze`
 UNION ALL SELECT 'silver', COUNT(*) FROM `case-abinbev-469918.Medallion.silver`
 UNION ALL SELECT 'gold',   COUNT(*) FROM `case-abinbev-469918.Medallion.gold`;
-
+```
 
 Writes Parquet to GCS and loads into Silver (WRITE_TRUNCATE).
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+💡 ## **SQL Code:**
+```sql
+SELECT d.department_name AS department,
+
+
+```
+
+
+##  📊 Output:
+
+## 1️⃣
+## 2️⃣
+## 3️⃣ 
+
+## 📁 3. Project Structure
+```css
+data_challenge/
+│
+├── app/
+│   ├── __init__.py
+│   ├── main.py
+│   └── upload.py
+│
+├── data_challenge.db
+├── Dockerfile
+├── docker-compose.yml
+├── requirements.txt
+└── README.md
+```
+
+
+### ✅ 1. Setting Up the Environment
+
+### 2. 🐳 Dockerizing the Application ##
+
+1. **Clone the Repository:**
+    ```powershell
+    git clone <repository_url>
+    cd data_challenge
+    ```
+
+### 1. Python 3.11+
+- [Download Python](https://www.python.org/downloads/)
+- Verify installation:
+    ```powershell
+    python --version
+    ```
