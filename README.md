@@ -6,19 +6,23 @@ This data pipeline ingests data from the Open Brewery DB API, performs transform
 It leverages Apache Airflow for orchestration, ensuring scheduled execution, error handling, and dependency management between the stages. 
 Google Cloud Storage is used for data storage, and BigQuery serves as the final destination for analytical queries.
 
+- **GCP Project:** `case-abinbev-469918`
+- **BQ Dataset:** `Medallion`
+- **BQ Tables:** `bronze`, `silver`, `gold`
+- **Composer bucket:** `us-central1-composer-case-165cfec3-bucket`
+- **DAG:** `bees_breweries_daily`
+- **Schedule:** `0 3 * * *` (daily at 03:00 UTC ≈ 00:00 America/Sao_Paulo)
+- **Source API:** `https://api.openbrewerydb.org/v1/breweries` (with pagination)
+
 Medallion Architecture: Implements the Bronze, Silver, Gold layered approach for data lake organization.
 Incremental Loading: Only processes new or changed data, improving efficiency.
 Data Validation: Uses hash comparisons to ensure data integrity.
 Monitoring and Alerting: Includes logging to GCS and email alerts for proactive monitoring.
-Orchestration: Utilizes Apache Airflow for scheduling, task dependencies, and error handling. 
+Orchestration: Utilizes Apache Airflow for scheduling, task dependencies, and error handling.
 
-Data pipeline summary
+## End-to-end flow
 
-This pipeline ingests the Open Brewery DB API and materializes a Medallion data lake (Bronze → Silver → Gold) orchestrated by Apache Airflow (Cloud Composer 3). Files are stored in GCS and analytical tables in BigQuery.
-
-End-to-end flow
-
-Bronze (raw snapshot): The DAG paginates the API (per_page=200) and iterates until an empty page is returned—so all pages are fetched, not just page 1. The full snapshot is serialized to a single UTF-8 NDJSON and written to GCS, plus a timestamped archive copy.
+**Bronze** (raw snapshot): The DAG paginates the API (per_page=200) and iterates until an empty page is returned—so all pages are fetched, not just page 1. The full snapshot is serialized to a single UTF-8 NDJSON and written to GCS, plus a timestamped archive copy.
 
 Change detection & idempotency: A SHA-256 is computed over the NDJSON bytes. The hash is compared to the previous run’s value stored in gs://us-central1-composer-case-165cfec3-bucket/control/bronze_sha256.txt.
 
@@ -26,11 +30,11 @@ If unchanged, Silver/Gold are skipped automatically (incremental gate).
 
 If changed (or forced), the pipeline proceeds to Silver and Gold.
 
-Silver (clean & typed): Reads Bronze from BigQuery, applies text repairs for known mojibake (e.g., Caf�→Café, Stra�e→Straße, K�rnten→Kärnten, Nieder�sterreich→Niederösterreich, W�rthersee→Wörthersee, Wimitzbr�u→Wimitzbräu), normalizes Unicode (NFC), and casts longitude/latitude to FLOAT64. It derives a deterministic state_partition integer and writes Parquet to GCS, then loads Medallion.silver (range-partitioned by state_partition and clustered by country, city).
+**Silver** (clean & typed): Reads Bronze from BigQuery, applies text repairs for known mojibake (e.g., Caf�→Café, Stra�e→Straße, K�rnten→Kärnten, Nieder�sterreich→Niederösterreich, W�rthersee→Wörthersee, Wimitzbr�u→Wimitzbräu), normalizes Unicode (NFC), and casts longitude/latitude to FLOAT64. It derives a deterministic state_partition integer and writes Parquet to GCS, then loads Medallion.silver (range-partitioned by state_partition and clustered by country, city).
 
-Gold (aggregated): Aggregates Silver to counts per country, state, brewery_type, writes Parquet to GCS, and loads Medallion.gold (clustered by country, state, brewery_type).
+**Gold** (aggregated): Aggregates Silver to counts per country, state, brewery_type, writes Parquet to GCS, and loads Medallion.gold (clustered by country, state, brewery_type).
 
-Storage & control artifacts (GCS)
+## Storage & control artifacts (GCS)
 
 Bronze NDJSON (current): gs://us-central1-composer-case-165cfec3-bucket/data/bronze/breweries.ndjson
 
@@ -44,7 +48,7 @@ Control file (hash): gs://us-central1-composer-case-165cfec3-bucket/control/bron
 
 Per-run logs: .../logs/<timestamp>/{bronze|silver|gold}.log
 
-Scheduling & forcing
+## Scheduling & forcing
 
 Schedule: 0 3 * * * (daily at 03:00 UTC, ≈00:00 America/Sao_Paulo). catchup=false.
 
@@ -54,29 +58,16 @@ Airflow Run Config: {"force": true}, or
 
 Airflow Variable: bees_force=true (then trigger normally).
 
-Operational characteristics
+## Operational characteristics
 
 Incremental loading: downstream stages run only when data changes, saving cost and time.
 
-Reliability: API calls use timeouts; Airflow handles retries and task-level error handling.
+## Reliability: 
+API calls use timeouts; Airflow handles retries and task-level error handling.
 
-Observability: Each stage writes a concise log to GCS with page/row counts, hash values, and outcomes (“changed”/“no change”).
+## Observability: 
+Each stage writes a concise log to GCS with page/row counts, hash values, and outcomes (“changed”/“no change”)
 
-# For detailed DOCKER deployment, please go to folder "DOCKER"
-
-
-# Overview
-
-A data pipeline that ingests the Open Brewery DB API and organizes it in a Medallion architecture (Bronze → Silver → Gold) orchestrated by Apache Airflow (Cloud Composer 3 / Airflow 2.x). Raw/derived files live in GCS; analytical tables live in BigQuery.
-
-- **GCP Project:** `case-abinbev-469918`
-- **BQ Dataset:** `Medallion`
-- **BQ Tables:** `bronze`, `silver`, `gold`
-- **Composer bucket:** `us-central1-composer-case-165cfec3-bucket`
-- **DAG:** `bees_breweries_daily`
-- **Schedule:** `0 3 * * *` (daily at 03:00 UTC ≈ 00:00 America/Sao_Paulo)
-- **Source API:** `https://api.openbrewerydb.org/v1/breweries` (with pagination)
-- 
 
 # Architecture (Medallion)
 
@@ -137,11 +128,11 @@ Creates state_partition (deterministic integer) for range partitioning.
 
 # DDL
 
-# DATASET
+## DATASET
 
 CREATE SCHEMA IF NOT EXISTS `case-abinbev-469918.Medallion`;
 
-# BRONZE
+### BRONZE
 
 CREATE TABLE IF NOT EXISTS `case-abinbev-469918.Medallion.bronze` (
   id            STRING,
@@ -162,7 +153,7 @@ CREATE TABLE IF NOT EXISTS `case-abinbev-469918.Medallion.bronze` (
   street        STRING
 );
 
-# SILVER
+### SILVER
 
  CREATE TABLE IF NOT EXISTS `case-abinbev-469918.Medallion.silver` (
   id STRING NOT NULL,
@@ -186,7 +177,7 @@ CREATE TABLE IF NOT EXISTS `case-abinbev-469918.Medallion.bronze` (
 PARTITION BY RANGE_BUCKET(state_partition, GENERATE_ARRAY(0, 50, 1))
 CLUSTER BY country, city;
 
-# GOLD
+### GOLD
 
 CREATE TABLE IF NOT EXISTS `case-abinbev-469918.Medallion.gold` (
   country         STRING,  -- Country name (from Silver)
@@ -217,14 +208,14 @@ SELECT
 FROM `case-abinbev-469918.Medallion.silver`
 GROUP BY 1,2,3;
 
-# Gold Sample
+### Gold Sample
 
 SELECT country, state, brewery_type, total_breweries
 FROM `case-abinbev-469918.Medallion.gold`
 ORDER BY country, state, brewery_type;
 
 
-## How to deploy & run
+# How to deploy & run
 
 **Upload the DAG**
 - Put `dag.py` in: `gs://us-central1-composer-case-165cfec3-bucket/dags/dag.py`
