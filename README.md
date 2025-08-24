@@ -159,7 +159,7 @@ CREATE TABLE IF NOT EXISTS `case-abinbev-469918.Medallion.bronze` (
 ```
 
 ### SILVER
-
+```sql
  CREATE TABLE IF NOT EXISTS `case-abinbev-469918.Medallion.silver` (
   id STRING NOT NULL,
   name STRING NOT NULL,
@@ -181,7 +181,7 @@ CREATE TABLE IF NOT EXISTS `case-abinbev-469918.Medallion.bronze` (
 )
 PARTITION BY RANGE_BUCKET(state_partition, GENERATE_ARRAY(0, 50, 1))
 CLUSTER BY country, city;
-
+```
 ### GOLD
 ```sql
 CREATE TABLE IF NOT EXISTS `case-abinbev-469918.Medallion.gold` (
