@@ -554,7 +554,8 @@ Cloud Run Jobs are a portable instrument that can play the same tune without the
 
 # Looker
 **Gold layer — Breweries by country (Looker Studio map)**
-![gold](https://github.com/user-attachments/assets/f2f8caba-7e4b-4647-958e-7e19b0e68ff2)
+
+![GOLD LOOKER](https://github.com/user-attachments/assets/9571e1af-7774-4aee-8189-06069e1f99bc)
 
 This chart is built from the Gold table (case-abinbev-469918.Medallion.gold). Each bubble represents a country; the bubble size encodes the number of breweries in that country.
 
