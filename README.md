@@ -71,6 +71,31 @@ API calls use timeouts; Airflow handles retries and task-level error handling.
 ### Observability: 
 Each stage writes a concise log to GCS with page/row counts, hash values, and outcomes (“changed”/“no change”)
 
+**Airflow / Composer**
+
+DAG view shows task status and Gantt.
+
+Task logs are also copied to gs://.../logs/YYYYMMDD/*.log for quick download.
+
+Email alerts can be enabled on task failure (SMTP/SendGrid or Google Workspace).
+
+**Cloud Run Jobs**
+
+Job execution logs live in Cloud Logging (resource.type="run_job").
+
+Use Log-based Metrics → Alerting Policies to notify on failures or long runtimes.
+
+**Data quality (Dataplex)**
+
+You can run Data Profile & Data Quality scans on Medallion.silver and Medallion.gold.
+
+Recommended rules:
+
+Silver: id NON_NULL & UNIQUE, latitude/longitude ranges, value set for brewery_type.
+
+Gold: reconciliation vs Silver (total_breweries sanity check).
+
+Results surface in BigQuery table tabs (Profile/Quality) and in Dataplex.
 
 # Architecture (Medallion)
 
@@ -230,6 +255,13 @@ ORDER BY country, state, brewery_type;
 # How to deploy & run
 
 ## Service Account
+Every call to a Google Cloud API is made by an identity. For human users that’s Gmail/Workspace account; for workloads (Airflow tasks, Cloud Run jobs, build steps) it’s a Service Account (SA)—a robot identity that can be granted roles.
+
+**Principle of Least Privilege (PLP)**
+
+Give each workload only the permissions it needs—no more. This reduces blast radius if keys are leaked or code goes wrong, and it makes audits clearer.
+
+We use a single SA at first (to reduce moving parts), and then show how to tighten it. You can split into multiple SAs later (e.g., one for Composer, one for Cloud Run Jobs).
 
 **PIs & IAM (one-time)**
 
@@ -252,6 +284,17 @@ gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$SA"
 
 ```
 
+**What this is doing:**
+
+| Component                      | What it does                                                     | Minimal roles (reason)                                                                                                                                                                                   |
+| ------------------------------ | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Composer / Airflow workers** | Read/write files in GCS, create/query BigQuery tables, emit logs | `roles/storage.objectAdmin` (write artifacts/logs under the Composer bucket), `roles/bigquery.dataEditor` + `roles/bigquery.jobUser` (create tables, run queries), `roles/logging.logWriter` (send logs) |
+| **Cloud Run Job**              | Runs the containerized ETL outside Airflow                       | Same set as above if it touches the same data; additionally `roles/artifactregistry.reader` (pull image)                                                                                                 |
+| **Cloud Scheduler**            | Triggers Cloud Run Job on a schedule                             | `roles/run.invoker` (invoke the job’s run endpoint)                                                                                                                                                      |
+| **Cloud Build**                | Builds your container image from the Dockerfile                  | `roles/artifactregistry.writer` (push images), `roles/storage.readOnly` (read build context if in GCS)                                                                                                   |
+| **Budgets/Alerts**             | Publishes spend alerts                                           | Billing UI auto-configures; if using Pub/Sub, that topic needs a publisher binding for the billing service agent                                                                                         |
+
+
 ## Creating the Composer environment
 ```bash
 gcloud composer environments create $COMPOSER_ENV \
@@ -260,18 +303,6 @@ gcloud composer environments create $COMPOSER_ENV \
   --image-version=composer-3-airflow-2.8.1 \
   --service-account "$PROJECT_ID-compute@developer.gserviceaccount.com"
 ```
-
-**What this is doing:**
-
---project ties the environment to your billing/project context.
-
---location places the GKE Autopilot cluster and Composer bucket in us-central1 (keeping latency and egress predictable for BigQuery + Run).
-
---image-version pins a Composer 3 image that bundles Airflow 2.8.x—a stable, long-supported release with good provider compatibility.
-
---service-account picks the identity Airflow workers use to access GCS/BigQuery/etc. (the roles we granted above apply to this identity).
-
-
 
 **What this is doing:**
 
