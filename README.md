@@ -291,7 +291,7 @@ gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$SA"
 | **Composer / Airflow workers** | Read/write files in GCS, create/query BigQuery tables, emit logs | `roles/storage.objectAdmin` (write artifacts/logs under the Composer bucket), `roles/bigquery.dataEditor` + `roles/bigquery.jobUser` (create tables, run queries), `roles/logging.logWriter` (send logs) |
 | **Cloud Run Job**              | Runs the containerized ETL outside Airflow                       | Same set as above if it touches the same data; additionally `roles/artifactregistry.reader` (pull image)                                                                                                 |
 | **Cloud Scheduler**            | Triggers Cloud Run Job on a schedule                             | `roles/run.invoker` (invoke the job’s run endpoint)                                                                                                                                                      |
-| **Cloud Build**                | Builds your container image from the Dockerfile                  | `roles/artifactregistry.writer` (push images), `roles/storage.readOnly` (read build context if in GCS)                                                                                                   |
+| **Cloud Build**                | Builds the container image from the Dockerfile                  | `roles/artifactregistry.writer` (push images), `roles/storage.readOnly` (read build context if in GCS)                                                                                                   |
 | **Budgets/Alerts**             | Publishes spend alerts                                           | Billing UI auto-configures; if using Pub/Sub, that topic needs a publisher binding for the billing service agent                                                                                         |
 
 
@@ -306,7 +306,7 @@ gcloud composer environments create $COMPOSER_ENV \
 
 **What this is doing:**
 
---project ties the environment to your billing/project context.
+--project ties the environment to the billing/project context.
 
 --location places the GKE Autopilot cluster and Composer bucket in us-central1 (keeping latency and egress predictable for BigQuery + Run).
 
@@ -316,7 +316,7 @@ gcloud composer environments create $COMPOSER_ENV \
 
 ## Install PyPI packages (either via UI → Packages PyPI or CLI):
 
-Airflow runs your tasks in the Composer image; if your DAG imports libraries (pandas, pyarrow, GCS/BigQuery SDKs) they must exist on the workers. You can install through the UI (Packages PyPI) or via CLI:
+Airflow runs tasks in the Composer image; if the DAG imports libraries (pandas, pyarrow, GCS/BigQuery SDKs) they must exist on the workers. You can install through the UI (Packages PyPI) or via CLI:
 
 ### exact pins that worked in this project
 ```bash
@@ -346,12 +346,6 @@ gcloud beta composer environments update $COMPOSER_ENV \
 | `PAGE_SIZE`      | `200`                                        |
 | `DAG_SCHEDULE`   | `0 3 * * *` (03:00 UTC)                      |
 
-Force reprocess: trigger the DAG with Config: {"force": true} to override the bronze hash gate and run the full Bronze→Silver→Gold chain.
-
-
-**PyPI packages (Composer 3)**
-- Install via Composer UI (PyPI packages tab) if needed:
-  - `google-cloud-storage`, `google-cloud-bigquery`, `pandas`, `pyarrow`, `requests`, `pendulum`
 
 **Trigger manually (Cloud Shell)**
 ```bash
@@ -361,12 +355,8 @@ gcloud composer environments run composer-case --location=us-central1 \
 
 Force full rebuild (alternative)
 
-In Airflow → Admin → Variables set bees_force=true and trigger normally.
-
-To reset the change gate:
-```powershell
-gsutil rm -f gs://us-central1-composer-case-165cfec3-bucket/control/bronze_sha256.txt
-```
+Force reprocess: trigger the DAG with Config: {"force": true} to override the bronze hash gate and run the full Bronze→Silver→Gold chain.
+Go to Airflow → Admin → Variables set {"force": true} and trigger normally.
 
 ### Deploying the DAG
 
@@ -411,7 +401,7 @@ gs://us-central1-composer-case-165cfec3-bucket/
 
 This gives you a CLI-style runner outside Airflow (useful for ad-hoc runs or CI).
 
-Containerization packages your code + dependencies into an image that runs identically everywhere: locally, in Cloud Run Jobs, or from a CI pipeline. This gives you:
+Containerization packages the code + dependencies into an image that runs identically everywhere: locally, in Cloud Run Jobs, or from a CI pipeline. This gives you:
 
 - Reproducibility (no “works on my machine”).
 
@@ -436,7 +426,7 @@ COPY etl/ /app/etl/
 ENTRYPOINT ["python", "-m", "etl.main"]
 
 ```
-**requirements.txt** contains the exact libs your code imports (same pins you used in Composer to keep parity).
+**requirements.txt** contains the exact libs the code imports (same pins you used in Composer to keep parity).
 It is used: 
 - During build (Cloud Build) to create the image.
 
@@ -453,14 +443,14 @@ requests==2.32.3
 ```
 
 ## Build & push (Artifact Registry)
-Let's think of Artifact Registry as your private Docker Hub on GCP. 
-It stores versioned container images close to your runtime region (lower latency, lower egress), with IAM-controlled access.
+Let's think of Artifact Registry as a private Docker Hub on GCP. 
+It stores versioned container images close to the runtime region (lower latency, lower egress), with IAM-controlled access.
 
 **Step 1**: Creates a registry named, e.g., containers in us-central1.
 
-**Step 2**: Configures your local Docker/Cloud Build to push/pull from us-central1-docker.pkg.dev.
+**Step 2**: Configures local Docker/Cloud Build to push/pull from us-central1-docker.pkg.dev.
 
-**Step 3**: Cloud Build builds the image using your Dockerfile, then pushes it to the registry. The result is an immutable artifact identified by $IMAGE_TAG.
+**Step 3**: Cloud Build builds the image using the Dockerfile, then pushes it to the registry. The result is an immutable artifact identified by $IMAGE_TAG.
 
 ```bash
 gcloud artifacts repositories create $AR_REPO --repository-format=docker \
@@ -488,7 +478,7 @@ gcloud beta run jobs create $RUN_JOB \
 
 --image: which container to run—the one we just built.
 
---tasks 1: a single parallel task (you can fan out if your code supports sharding).
+--tasks 1: a single parallel task (you can fan out if the code supports sharding).
 
 --service-account: the identity the job uses to access GCS/BigQuery. Grant it only what it needs.
 
@@ -545,8 +535,8 @@ Grant only what each piece needs (PLP). Start broad, then tighten.
 The DAG is the score (steps & dependencies).
 Cloud Run Jobs are a portable instrument that can play the same tune without the orchestra—cheaply and on demand.
 
-- Artifact Registry is the instrument: where your images live.
-- Cloud Build constructs the instrument from your Dockerfile.
+- Artifact Registry is the instrument: where the images live.
+- Cloud Build constructs the instrument from the Dockerfile.
 - GCS stores artifacts and logs; 
 - BigQuery holds analytical tables.
 - Partition/cluster to lower cost. Normalize text to make our lives easy.
