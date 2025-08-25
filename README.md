@@ -225,8 +225,70 @@ ORDER BY country, state, brewery_type;
 
 # How to deploy & run
 
-**Upload the DAG**
-- Put `dag.py` in: `gs://us-central1-composer-case-165cfec3-bucket/dags/dag.py`
+## Service Account
+
+**PIs & IAM (one-time)**
+
+```bash
+gcloud services enable \
+  artifactregistry.googleapis.com run.googleapis.com cloudscheduler.googleapis.com \
+  cloudbuild.googleapis.com composer.googleapis.com bigquery.googleapis.com \
+  storage.googleapis.com pubsub.googleapis.com billingbudgets.googleapis.com \
+  monitoring.googleapis.com logging.googleapis.com --project $PROJECT_ID
+```
+
+Grant the Compute Default SA (or a dedicated SA) the minimal roles (can be tightened later):
+
+```bash
+SA="$PROJECT_ID-compute@developer.gserviceaccount.com"
+gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$SA" --role="roles/storage.admin"
+gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$SA" --role="roles/bigquery.admin"
+gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$SA" --role="roles/run.admin"
+gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$SA" --role="roles/cloudscheduler.admin"
+
+```
+
+## Creating the Composer environment
+```bash
+gcloud composer environments create $COMPOSER_ENV \
+  --project $PROJECT_ID \
+  --location $REGION \
+  --image-version=composer-3-airflow-2.8.1 \
+  --service-account "$PROJECT_ID-compute@developer.gserviceaccount.com"
+```
+
+Install PyPI packages (either via UI → Packages PyPI or CLI):
+
+### exact pins that worked in this project
+```bash
+gcloud beta composer environments update $COMPOSER_ENV \
+  --location $REGION \
+  --update-pypi-package=google-cloud-storage==2.16.0 \
+  --update-pypi-package=google-cloud-bigquery==3.25.0 \
+  --update-pypi-package=pandas==2.2.2 \
+  --update-pypi-package=pyarrow==16.1.0 \
+  --update-pypi-package=gcsfs==2024.6.1 \
+  --update-pypi-package=requests==2.32.3
+```
+
+### Airflow Variables (UI → Admin → Variables):
+
+| Key              | Value                                        |
+| ---------------- | -------------------------------------------- |
+| `BQ_PROJECT`     | `case-abinbev-469918`                        |
+| `BQ_DATASET`     | `Medallion`                                  |
+| `GCS_BUCKET`     | `us-central1-composer-case-165cfec3-bucket`  |
+| `BRONZE_PREFIX`  | `data/bronze`                                |
+| `SILVER_PREFIX`  | `data/silver`                                |
+| `GOLD_PREFIX`    | `data/gold`                                  |
+| `CONTROL_PREFIX` | `control`                                    |
+| `LOGS_PREFIX`    | `logs`                                       |
+| `API_BASE`       | `https://api.openbrewerydb.org/v1/breweries` |
+| `PAGE_SIZE`      | `200`                                        |
+| `DAG_SCHEDULE`   | `0 3 * * *` (03:00 UTC)                      |
+
+Force reprocess: trigger the DAG with Config: {"force": true} to override the bronze hash gate and run the full Bronze→Silver→Gold chain.
+
 
 **PyPI packages (Composer 3)**
 - Install via Composer UI (PyPI packages tab) if needed:
@@ -246,6 +308,129 @@ To reset the change gate:
 ```powershell
 gsutil rm -f gs://us-central1-composer-case-165cfec3-bucket/control/bronze_sha256.txt
 ```
+
+### Deploying the DAG
+
+**Upload the DAG**
+- Put `dag.py` in: `gs://us-central1-composer-case-165cfec3-bucket/dags/dag.py`
+
+- Upload dag.py to gs://us-central1-composer-case-165cfec3-bucket/dags/.
+Composer syncs it automatically; within ~60s the DAG bees_breweries_daily appears.
+
+Schedule: daily at 03:00 UTC (configurable via variable DAG_SCHEDULE).
+
+Manual run:
+
+Airflow UI → Trigger DAG.
+
+To rebuild all layers now: Run Config → {"force": true} (overrides the bronze hash check).
+
+## Configuring the Google Cloud Storage buckets (layout)
+
+```bash
+gs://us-central1-composer-case-165cfec3-bucket/
+├─ dags/
+│   └─ dag.py
+├─ data/
+│   ├─ bronze/
+│   │   ├─ breweries.ndjson
+│   │   └─ archive/breweries_YYYYMMDD_HHMMSS.ndjson
+│   ├─ silver/
+│   │   ├─ breweries_transformed.parquet
+│   │   └─ archive/breweries_transformed_YYYYMMDD_HHMMSS.parquet
+│   └─ gold/
+│       ├─ breweries_aggregated.parquet
+│       └─ archive/breweries_aggregated_YYYYMMDD_HHMMSS.parquet
+├─ control/
+│   └─ bronze_sha256.txt
+└─ logs/
+    └─ YYYYMMDD/bronze.log  silver.log  gold.log
+```
+
+# 🐳 Containerizing the ETL (Cloud Run Jobs)
+
+This gives you a CLI-style runner outside Airflow (useful for ad-hoc runs or CI).
+
+## Dockerfile (project root)
+```bash
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY etl/ /app/etl/
+# entrypoint can run the same logic as the DAG tasks (bronze->silver->gold)
+ENTRYPOINT ["python", "-m", "etl.main"]
+```
+
+requirements.txt
+```bash
+google-cloud-storage==2.16.0
+google-cloud-bigquery==3.25.0
+pandas==2.2.2
+pyarrow==16.1.0
+gcsfs==2024.6.1
+requests==2.32.3
+```
+
+## Build & push (Artifact Registry)
+
+```bash
+gcloud artifacts repositories create $AR_REPO --repository-format=docker \
+  --location=$REGION --description="Breweries containers" || true
+
+gcloud auth configure-docker $REGION-docker.pkg.dev
+
+gcloud builds submit \
+  --tag $REGION-docker.pkg.dev/$PROJECT_ID/$AR_REPO/$IMAGE_NAME:$IMAGE_TAG
+```
+
+## Create the Cloud Run Job
+
+```bash
+gcloud beta run jobs create $RUN_JOB \
+  --image $REGION-docker.pkg.dev/$PROJECT_ID/$AR_REPO/$IMAGE_NAME:$IMAGE_TAG \
+  --region $REGION \
+  --tasks 1 \
+  --service-account "$PROJECT_ID-compute@developer.gserviceaccount.com" \
+  --set-env-vars PROJECT_ID=$PROJECT_ID,BQ_DATASET=$DATASET,GCS_BUCKET=$COMPOSER_BUCKET
+```
+
+**Run on demand**
+```bash
+# Scheduler hits the Cloud Run Jobs API endpoint
+gcloud scheduler jobs create http breweries-etl-daily \
+  --location=$REGION \
+  --schedule="0 3 * * *" \
+  --uri="https://$REGION-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/$PROJECT_ID/jobs/$RUN_JOB:run" \
+  --http-method=POST \
+  --oauth-service-account-email="$PROJECT_ID-compute@developer.gserviceaccount.com" \
+  --oauth-token-scope="https://www.googleapis.com/auth/cloud-platform"
+```
+
+**Scheduling the Cloud Run Job (Cloud Scheduler)**
+Scheduler hits the Cloud Run Jobs API endpoint
+```bash 
+gcloud scheduler jobs create http breweries-etl-daily \
+  --location=$REGION \
+  --schedule="0 3 * * *" \
+  --uri="https://$REGION-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/$PROJECT_ID/jobs/$RUN_JOB:run" \
+  --http-method=POST \
+  --oauth-service-account-email="$PROJECT_ID-compute@developer.gserviceaccount.com" \
+  --oauth-token-scope="https://www.googleapis.com/auth/cloud-platform"
+```
+
+
+Now I have two orchestrators:
+
+Airflow (Composer) for the main DAG.
+
+Cloud Run Job + Scheduler for an alternative/backup runner.
+
+I can use one or both as needed.
+
+
 
 # Validation queries
 
