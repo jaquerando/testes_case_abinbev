@@ -552,7 +552,39 @@ Cloud Run Jobs are a portable instrument that can play the same tune without the
 
 
 
+# Looker
+**Gold layer — Breweries by country (Looker Studio map)**
+![gold](https://github.com/user-attachments/assets/f2f8caba-7e4b-4647-958e-7e19b0e68ff2)
 
+This chart is built from the Gold table (case-abinbev-469918.Medallion.gold). Each bubble represents a country; the bubble size encodes the number of breweries in that country.
+
+Hover a bubble to see the exact value (from the total_breweries metric).
+
+Click a bubble to cross-filter other charts on the page (if enabled).
+
+Gold is the curated, aggregated layer. Here we pre-compute the count of breweries per (country, state, brewery_type) in Silver and then roll it up for country-level views. That keeps the dashboard fast and inexpensive while ensuring the data is already cleaned (Unicode fixes, typed fields) and deduplicated upstream.
+
+- How the metric is calculated
+
+Source: Medallion.gold
+
+Metric: SUM(total_breweries) grouped by country
+
+Update cadence: daily at 03:00 UTC (or on forced runs)
+
+- How to read it
+
+Larger bubble = more breweries in that country.
+
+Countries with no data won’t display a bubble.
+
+Numbers reflect the latest successful pipeline run; they will change when the upstream API changes.
+
+- Considerations
+
+Counts are based on the Open Brewery DB and may include small bars/brewpubs depending on brewery_type.
+
+This view is country-level; use the table or a drill-down page to analyze by state or brewery_type.
 
 
 
