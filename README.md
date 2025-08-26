@@ -22,6 +22,54 @@ Orchestration: Utilizes Apache Airflow for scheduling, task dependencies, and er
 
 ## End-to-end flow
 
+```mermaid
+flowchart LR
+    subgraph "Internet"
+        API[Open Brewery DB API]
+    end
+
+    subgraph "Cloud Composer (Airflow)"
+        DAG[DAG: bees_breweries_daily]
+    end
+
+    API -->|paginate & fetch| DAG
+
+    subgraph GCS ["Cloud Storage"]
+        B[bronze/ breweries.ndjson + archive]
+        S[silver/ breweries_transformed.parquet + archive]
+        G[gold/ breweries_aggregated.parquet + archive]
+        CTRL[control/ bronze_sha256.txt]
+        LOGS[logs/ YYYYMMDD/*.log]
+    end
+
+    DAG -->|write NDJSON, compute SHA256| B
+    DAG -->|compare| CTRL
+    CTRL -->|unchanged? skip| DAG
+
+    subgraph BQ ["BigQuery: Medallion"]
+        T1[(bronze)]
+        T2[(silver)]
+        T3[(gold)]
+    end
+
+    B -->|load| T1
+    T1 -->|clean, normalize, cast| S
+    S -->|load| T2
+    T2 -->|aggregate| G
+    G -->|load| T3
+
+    subgraph Run ["Cloud Run Job (optional)"]
+        JOB[breweries-etl-job]
+    end
+
+    Scheduler[Cloud Scheduler] -->|03:00 UTC| JOB
+    JOB -->|same steps as DAG| G & T3
+
+    classDef store fill:#f6f8fa,stroke:#d0d7de,color:#24292f;
+    class B,S,G,CTRL,LOGS store;
+    class T1,T2,T3 store;
+```
+
 **Bronze** 
 The DAG paginates the API (per_page=200) and iterates until an empty page is returned—so all pages are fetched, not just page 1. The full snapshot is serialized to a single UTF-8 NDJSON and written to GCS, plus a timestamped archive copy.
 
