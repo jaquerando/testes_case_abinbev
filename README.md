@@ -534,7 +534,7 @@ Cloud Run Jobs are a portable instrument that can play the same tune without the
 - Cloud Monitoring/Logging tells us when anything goes sideways.
 
 
-# Pub Sub for billing budgets alerts
+# Pub Sub and Billing Budgets Alerts
 
 
 Near-real-time signals whenever spend crosses a threshold (e.g., every R$50), so I can react before end-of-case surprises. This guide wires Billing Budgets → Pub/Sub  that turns raw budget notifications into step alerts (R$50, R$100, R$150…).
@@ -583,6 +583,15 @@ In Notifications:
 
 - Budgets can be set on a project, folder, or billing account and can use fixed amount or forecast/actual percentages.
 - Budgets evaluate periodically (not real-time).
+
+
+### Reports
+
+There is not much historical data to plot future costs but still something really called my attention.
+
+![18](https://github.com/user-attachments/assets/238ed39e-0152-4a7a-b6d8-1fbccab4c237)
+
+Compare the costs for Composer and Cloud Run. Look at that! The difference of cost!
 
 # Looker
 **Gold layer — Breweries by country (Looker Studio map)**
