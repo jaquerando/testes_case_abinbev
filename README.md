@@ -300,6 +300,17 @@ FROM `case-abinbev-469918.Medallion.gold`
 ORDER BY country, state, brewery_type;
 ```
 
+## Dataplex
+
+![13](https://github.com/user-attachments/assets/8650219d-179c-4e37-b266-81b853dc61d8)
+
+And in more detail...
+
+![gold](https://github.com/user-attachments/assets/e6664933-4608-4e8e-babf-4bce63d0c628)
+
+
+
+
 # How to deploy & run
 
 ## Service Account
@@ -352,6 +363,9 @@ gcloud composer environments create $COMPOSER_ENV \
   --service-account "$PROJECT_ID-compute@developer.gserviceaccount.com"
 ```
 
+![7](https://github.com/user-attachments/assets/3f71c3bc-ccaa-4ee5-8bd3-e285d5bee2d0)
+
+
 **What this is doing:**
 
 --project ties the environment to the billing/project context.
@@ -393,6 +407,9 @@ gcloud beta composer environments update $COMPOSER_ENV \
 | `API_BASE`       | `https://api.openbrewerydb.org/v1/breweries` |
 | `PAGE_SIZE`      | `200`                                        |
 | `DAG_SCHEDULE`   | `0 3 * * *` (03:00 UTC)                      |
+
+
+![5](https://github.com/user-attachments/assets/3ec670ed-e42d-47f5-9f38-b46eec2d96e4)
 
 
 **Trigger manually (Cloud Shell)**
@@ -561,6 +578,8 @@ gcloud scheduler jobs create http breweries-etl-daily \
   --oauth-token-scope="https://www.googleapis.com/auth/cloud-platform"
 ```
 
+![4](https://github.com/user-attachments/assets/b4471dfe-c625-4e7d-8319-c0fd96d9eeed)
+
 
 Now I have two orchestrators:
 
@@ -572,8 +591,7 @@ I can use one or both as needed.
 
 
 
-
-# Sum up
+# Sum up until here
 
 - Cloud Run Jobs give us a containerized, stand-alone runner for the same ETL logic—perfect for ad-hoc runs, CI/CD smoke tests, or running when Composer is paused. Jobs scale to zero and bill only while running. They’re cheaper and simpler than keeping a VM, and simpler than spinning a transient Dataproc cluster for a small Python ETL.
 
@@ -690,63 +708,3 @@ This view is country-level; use the table or a drill-down page to analyze by sta
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-💡 ## **SQL Code:**
-```sql
-SELECT d.department_name AS department,
-
-
-```
-
-
-##  📊 Output:
-
-## 1️⃣
-## 2️⃣
-## 3️⃣ 
-
-## 📁 3. Project Structure
-```css
-data_challenge/
-│
-├── app/
-│   ├── __init__.py
-│   ├── main.py
-│   └── upload.py
-│
-├── data_challenge.db
-├── Dockerfile
-├── docker-compose.yml
-├── requirements.txt
-└── README.md
-```
-
-
-### ✅ 1. Setting Up the Environment
-
-### 2. 🐳 Dockerizing the Application ##
-
-1. **Clone the Repository:**
-    ```powershell
-    git clone <repository_url>
-    cd data_challenge
-    ```
-
-### 1. Python 3.11+
-- [Download Python](https://www.python.org/downloads/)
-- Verify installation:
-    ```powershell
-    python --version
-    ```
