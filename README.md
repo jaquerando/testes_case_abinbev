@@ -558,6 +558,8 @@ gcloud pubsub topics create billing-alerts --project="$PROJECT_ID"
 
 ```
 
+The Budget service needs permission to publish into the billing topic with role of pub/sub publisher.
+
 ```bash 
 gcloud pubsub topics add-iam-policy-binding billing-alerts \
   --project="$PROJECT_ID" \
