@@ -534,7 +534,7 @@ Cloud Run Jobs are a portable instrument that can play the same tune without the
 - Cloud Monitoring/Logging tells us when anything goes sideways.
 
 
-# Pub Sub for billing budjets alerts
+# Pub Sub for billing budgets alerts
 
 
 Near-real-time signals whenever spend crosses a threshold (e.g., every R$50), so I can react before end-of-case surprises. This guide wires Billing Budgets → Pub/Sub  that turns raw budget notifications into step alerts (R$50, R$100, R$150…).
