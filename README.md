@@ -121,27 +121,27 @@ Each stage writes a concise log to GCS with page/row counts, hash values, and ou
 
 **Airflow / Composer**
 
-DAG view shows task status and Gantt.
+- DAG view shows task status and Gantt.
 
-Task logs are also copied to gs://.../logs/YYYYMMDD/*.log for quick download.
+- Task logs are also copied to gs://.../logs/YYYYMMDD/*.log for quick download.
 
-Email alerts can be enabled on task failure (SMTP/SendGrid or Google Workspace).
+- Email alerts can be enabled on task failure (SMTP/SendGrid or Google Workspace).
 
 **Cloud Run Jobs**
 
-Job execution logs live in Cloud Logging (resource.type="run_job").
+- Job execution logs live in Cloud Logging (resource.type="run_job").
 
-Use Log-based Metrics → Alerting Policies to notify on failures or long runtimes.
+- Use Log-based Metrics → Alerting Policies to notify on failures or long runtimes.
 
 **Data quality (Dataplex)**
 
-You can run Data Profile & Data Quality scans on Medallion.silver and Medallion.gold.
+- I run Data Profile & Data Quality scans on Medallion.silver and Medallion.gold.
 
-Recommended rules:
+Main rules:
 
-Silver: id NON_NULL & UNIQUE, latitude/longitude ranges, value set for brewery_type.
+- Silver: id NON_NULL & UNIQUE, latitude/longitude ranges, value set for brewery_type.
 
-Gold: reconciliation vs Silver (total_breweries sanity check).
+- Gold: reconciliation vs Silver (total_breweries sanity check).
 
 Results surface in BigQuery table tabs (Profile/Quality) and in Dataplex.
 
