@@ -423,6 +423,17 @@ Airflow UI → Trigger DAG.
 
 To rebuild all layers now: Run Config → {"force": true} (overrides the bronze hash check).
 
+<img width="1055" height="431" alt="Airflow" src="https://github.com/user-attachments/assets/d5e9d8ac-10d4-443c-833f-66295915c784" />
+
+These are the last executions
+
+![2](https://github.com/user-attachments/assets/52764e6e-fba2-498e-906f-12089d098a85)
+
+And these are the specific logs of the first task (bronze_extract_and_gate), taking page by page of Api information and storing SHA.
+
+![3](https://github.com/user-attachments/assets/99d7f548-e9b4-4bed-b8b6-97a4ee97b689)
+
+
 ## Configuring the Google Cloud Storage buckets (layout)
 
 ```bash
