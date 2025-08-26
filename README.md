@@ -570,6 +570,7 @@ gcloud pubsub topics add-iam-policy-binding billing-alerts \
 UI path:
 
 Go to Billing → Budgets & alerts
+
 Click Create budget or choose one already made (budget_billing)
 
 In Notifications:
