@@ -513,16 +513,6 @@ I can use one or both as needed.
 
 
 
-# Validation queries
-
-**Row counts**
-```sql
-SELECT 'bronze' AS tbl, COUNT(*) FROM `case-abinbev-469918.Medallion.bronze`
-UNION ALL SELECT 'silver', COUNT(*) FROM `case-abinbev-469918.Medallion.silver`
-UNION ALL SELECT 'gold',   COUNT(*) FROM `case-abinbev-469918.Medallion.gold`;
-```
-
-Writes Parquet to GCS and loads into Silver (WRITE_TRUNCATE).
 
 # Sum up
 
@@ -544,13 +534,52 @@ Cloud Run Jobs are a portable instrument that can play the same tune without the
 - Cloud Monitoring/Logging tells us when anything goes sideways.
 
 
+# Pub Sub for billing budjets alerts
 
 
+Near-real-time signals whenever spend crosses a threshold (e.g., every R$50), so I can react before end-of-case surprises. This guide wires Billing Budgets → Pub/Sub  that turns raw budget notifications into step alerts (R$50, R$100, R$150…).
 
+Pub/Sub (Publish/Subscribe) is Google Cloud’s managed event bus:
 
+Durable: messages are persisted for a retention period; consumers can be offline and read later.
 
+Fan-out: many subscribers can receive the same event (email, Slack, BigQuery logging, etc.).
 
+Decoupled: Billing (publisher) doesn’t need to know who consumes alerts.
 
+### Create the Pub/Sub topic (CLI)
+
+```bash 
+gcloud pubsub topics create billing-alerts --project="$PROJECT_ID"
+```
+
+### Grant the Budget service Publisher on the topic
+```bash 
+
+```
+
+```bash 
+gcloud pubsub topics add-iam-policy-binding billing-alerts \
+  --project="$PROJECT_ID" \
+  --member="serviceAccount:billing-budget-alert@system.gserviceaccount.com" \
+  --role="roles/pubsub.publisher"
+```
+
+### Point a Budget to the topic
+
+UI path:
+
+Go to Billing → Budgets & alerts
+Click Create budget or choose one already made (budget_billing)
+
+In Notifications:
+- Check Email if you want email alerts.
+- Check Publish to a Pub/Sub topic and pick billing-alerts (here is where the connection with pub sub happens!)
+
+![17](https://github.com/user-attachments/assets/336c2a50-dcea-4ca9-9fbf-a4b9f24f16ab)
+
+- Budgets can be set on a project, folder, or billing account and can use fixed amount or forecast/actual percentages.
+- Budgets evaluate periodically (not real-time).
 
 # Looker
 **Gold layer — Breweries by country (Looker Studio map)**
