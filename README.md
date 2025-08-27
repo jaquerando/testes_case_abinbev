@@ -725,5 +725,38 @@ Counts are based on the Open Brewery DB and may include small bars/brewpubs depe
 This view is country-level; use the table or a drill-down page to analyze by state or brewery_type.
 
 
+# References
+
+Google Cloud – Programmatic notifications for Cloud Billing budgets.
+How Billing Budgets publish JSON messages to Pub/Sub, required principals, message schema, and configuration options.
+https://cloud.google.com/billing/docs/how-to/budgets-programmatic-notifications
+
+Google Cloud – Alerting policies (Monitoring).
+Creating and managing alerting policies; useful background for notifications and SRE-style alerting terminology used in this repo.
+https://cloud.google.com/monitoring/alerts
+
+University of Wisconsin – GCP Billing Alerts (KB).
+Concise walkthrough of setting budgets/alerts; helpful for UI-driven steps.
+https://kb.wisc.edu/music/148692
+
+Google Cloud Skills Boost – Service Accounts & Roles (IAM).
+Principles of service accounts, least privilege, and role assignments referenced in the IAM sections.
+https://www.cloudskillsboost.google/focuses/1038
+
+Google Cloud – Pub/Sub IAM (Access control).
+Roles (Publisher/Subscriber/Admin), resource-level permissions, and how principals are authorized on topics/subscriptions.
+https://cloud.google.com/pubsub/docs/access-control
+
+Google Cloud – Build container images (Cloud Build).
+gcloud builds submit, Docker build best practices, and Artifact Registry integration used in the containerization section.
+https://cloud.google.com/build/docs/building/build-containers
+
+Zenika – Cloud Run Jobs, your parallel tasks solution.
+Conceptual overview of Cloud Run Jobs and when to prefer Jobs over Services; informs our “why Cloud Run Jobs” rationale.
+https://dev.to/zenika/cloud-run-jobs-your-parallel-tasks-solution-j05
+
+Google Cloud – Execute Cloud Run Jobs on a schedule.
+How to schedule Jobs with Cloud Scheduler; aligns with the cron-based orchestration notes in the doc.
+https://cloud.google.com/run/docs/execute/jobs-on-schedule
 
 
