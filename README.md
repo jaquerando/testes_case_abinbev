@@ -298,13 +298,44 @@ ORDER BY country, state, brewery_type;
 
 ## Dataplex
 
+This project uses Dataplex to attach governance to the Medallion tables. We run a Data Profile first (so Dataplex learns distributions, null-rates, min/max, cardinality, etc.), and then a Data Quality scan with rules that validate business expectations. The screenshot below is the Gold table’s latest run.
+
+- Discoverability: the Profile auto-documents columns (types, null rates, distinct values).
+
+- Trust: Quality rules catch schema drifts and bad values before analysts consume the table.
+
+- Automation: scans can be scheduled (or triggered after the pipeline) and produce a pass/fail report.
+
 ![13](https://github.com/user-attachments/assets/8650219d-179c-4e37-b266-81b853dc61d8)
 
 And in more detail...
 
 ![gold](https://github.com/user-attachments/assets/e6664933-4608-4e8e-babf-4bce63d0c628)
 
+How to read it:
 
+- Overall Score (100%)
+Percentage of all rules that passed in this run. If 9 of 10 rules pass, it would be 90%. We keep equal weight across rules.
+
+- Completeness (100%)
+Measures missingness based on rules that check presence of data (e.g., Non-Null).
+100% means every row satisfied all completeness rules (no required fields were null).
+
+- Validity (100%)
+Measures whether values conform to allowed semantics (Value-in-set, Range, Row/Table conditions).
+100% means every row satisfied those semantic constraints.
+
+**Column status table**
+For each column that is referenced by rules:
+
+- Quality index shows the per-column pass rate.
+
+- Completeness reflects Non-Null type rules for that column.
+
+- Validity reflects semantic rules (value sets, ranges, conditions) for that column.
+
+It's possible to export results to a BigQuery dataset for monitoring dashboards or schedule scans to run after the pipeline, or wire them to a daily schedule for continuous assurance. Pub sub topics can be a good practice too, or email webhooks if any rule fails.
+For this project, I want it to behave as an Ad hoc scan, to avoid higher costs, but in a production env for sure it is a good tool to be running daily, avoiding to get surprised by inconsistencies.
 
 
 # How to deploy & run
