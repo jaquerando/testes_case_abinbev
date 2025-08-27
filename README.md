@@ -612,27 +612,6 @@ Cloud Run Job + Scheduler (if needed) for an alternative/backup runner.
 
 I can use one or both as needed.
 
-
-# Sum up until here
-
-- Cloud Run Jobs give us a containerized, stand-alone runner for the same ETL logic—perfect for ad-hoc runs, CI/CD smoke tests, or running when Composer is paused. Jobs scale to zero and bill only while running. They’re cheaper and simpler than keeping a VM, and simpler than spinning a transient Dataproc cluster for a small Python ETL.
-
-- Service Accounts are robot identities. Everything in this stack runs as an SA.
-Grant only what each piece needs (PLP). Start broad, then tighten.
-
-- Composer is the conductor (orchestrator).
-The DAG is the score (steps & dependencies).
-Cloud Run Jobs are a portable instrument that can play the same tune without the orchestra—cheaply and on demand.
-
-- Artifact Registry is the instrument: where the images live.
-- Cloud Build constructs the instrument from the Dockerfile.
-- GCS stores artifacts and logs; 
-- BigQuery holds analytical tables.
-- Partition/cluster to lower cost. Normalize text to make our lives easy.
-- Budgets & Alerts ensure we don’t overspend;
-- Cloud Monitoring/Logging tells us when anything goes sideways.
-
-
 # Pub Sub and Billing Budgets Alerts
 
 
