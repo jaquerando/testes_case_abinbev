@@ -6,6 +6,12 @@ This data pipeline ingests data from the Open Brewery DB API, performs transform
 It leverages Apache Airflow for orchestration, ensuring scheduled execution, error handling, and dependency management between the stages. 
 Google Cloud Storage is used for data storage, and BigQuery serves as the final destination for analytical queries.
 
+Medallion Architecture: Implements the Bronze, Silver, Gold layered approach for data lake organization.
+Incremental Loading: Only processes new or changed data, improving efficiency.
+Data Validation: Uses hash comparisons to ensure data integrity.
+Monitoring and Alerting: Includes logging to GCS and email alerts for proactive monitoring.
+Orchestration: Utilizes Apache Airflow for scheduling, task dependencies, and error handling.
+
 ## Table of Contents
 
 - [Data pipeline summary](#data-pipeline-summary)
@@ -46,20 +52,6 @@ Google Cloud Storage is used for data storage, and BigQuery serves as the final 
 - [Looker](#looker)
 - [References](#references)
 
-
-- **GCP Project:** `case-abinbev-469918`
-- **BQ Dataset:** `Medallion`
-- **BQ Tables:** `bronze`, `silver`, `gold`
-- **Composer bucket:** `us-central1-composer-case-165cfec3-bucket`
-- **DAG:** `bees_breweries_daily`
-- **Schedule:** `0 3 * * *` (daily at 03:00 UTC ≈ 00:00 America/Sao_Paulo)
-- **Source API:** `https://api.openbrewerydb.org/v1/breweries` (with pagination)
-
-Medallion Architecture: Implements the Bronze, Silver, Gold layered approach for data lake organization.
-Incremental Loading: Only processes new or changed data, improving efficiency.
-Data Validation: Uses hash comparisons to ensure data integrity.
-Monitoring and Alerting: Includes logging to GCS and email alerts for proactive monitoring.
-Orchestration: Utilizes Apache Airflow for scheduling, task dependencies, and error handling.
 
 ## End-to-end flow
 
@@ -143,6 +135,14 @@ Per-run logs: .../logs/<timestamp>/{bronze|silver|gold}.log
 ## Operational characteristics
 
 Incremental loading: downstream stages run only when data changes, saving cost and time.
+
+- **GCP Project:** `case-abinbev-469918`
+- **BQ Dataset:** `Medallion`
+- **BQ Tables:** `bronze`, `silver`, `gold`
+- **Composer bucket:** `us-central1-composer-case-165cfec3-bucket`
+- **DAG:** `bees_breweries_daily`
+- **Schedule:** `0 3 * * *` (daily at 03:00 UTC ≈ 00:00 America/Sao_Paulo)
+- **Source API:** `https://api.openbrewerydb.org/v1/breweries` (with pagination)
 
 ### Reliability: 
 API calls use timeouts; Airflow handles retries and task-level error handling.
