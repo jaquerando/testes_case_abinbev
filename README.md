@@ -70,7 +70,7 @@ flowchart LR
     class T1,T2,T3 store;
 ```
 
-## **Bronze** 
+### **Bronze** 
 The DAG paginates the API (per_page=200) and iterates until an empty page is returned—so all pages are fetched, not just page 1. The full snapshot is serialized to a single UTF-8 NDJSON and written to GCS, plus a timestamped archive copy.
 
 Change detection & idempotency: A SHA-256 is computed over the NDJSON bytes. The hash is compared to the previous run’s value stored in gs://us-central1-composer-case-165cfec3-bucket/control/bronze_sha256.txt.
@@ -79,10 +79,10 @@ If unchanged, Silver/Gold are skipped automatically (incremental gate).
 
 If changed (or forced), the pipeline proceeds to Silver and Gold.
 
-## **Silver** 
+### **Silver** 
 Reads Bronze from BigQuery, applies text repairs for known mojibake (e.g., Caf�→Café, Stra�e→Straße, K�rnten→Kärnten, Nieder�sterreich→Niederösterreich, W�rthersee→Wörthersee, Wimitzbr�u→Wimitzbräu), normalizes Unicode (NFC), and casts longitude/latitude to FLOAT64. It derives a deterministic state_partition integer and writes Parquet to GCS, then loads Medallion.silver (range-partitioned by state_partition and clustered by country, city).
 
-## **Gold** 
+### **Gold** 
 Aggregates Silver to counts per country, state, brewery_type, writes Parquet to GCS, and loads Medallion.gold (clustered by country, state, brewery_type).
 
 ## Storage & control artifacts (GCS)
