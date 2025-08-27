@@ -99,16 +99,6 @@ Control file (hash): gs://us-central1-composer-case-165cfec3-bucket/control/bron
 
 Per-run logs: .../logs/<timestamp>/{bronze|silver|gold}.log
 
-## Scheduling & forcing
-
-Schedule: 0 3 * * * (daily at 03:00 UTC, ≈00:00 America/Sao_Paulo). catchup=false.
-
-Force a full run (bypass the hash gate) via:
-
-Airflow Run Config: {"force": true}, or
-
-Airflow Variable: bees_force=true (then trigger normally).
-
 ## Operational characteristics
 
 Incremental loading: downstream stages run only when data changes, saving cost and time.
@@ -203,11 +193,11 @@ Creates state_partition (deterministic integer) for range partitioning.
 
 Aggregation and final summary of info
 
-# DDL
+## DDL - DATASET
 
-## DATASET
-
+```sql
 CREATE SCHEMA IF NOT EXISTS `case-abinbev-469918.Medallion`;
+```
 
 ### BRONZE
 ```sql
@@ -450,6 +440,10 @@ Force full rebuild (alternative)
 Force reprocess: trigger the DAG with Config: {"force": true} to override the bronze hash gate and run the full Bronze→Silver→Gold chain.
 Go to Airflow → Admin → Variables set {"force": true} and trigger normally.
 
+**Scheduling**
+
+Schedule: 0 3 * * * (daily at 03:00 UTC, ≈00:00 America/Sao_Paulo). catchup=false.
+
 ### Deploying the DAG
 
 **Upload the DAG**
@@ -565,6 +559,8 @@ gcloud builds submit \
   --tag $REGION-docker.pkg.dev/$PROJECT_ID/$AR_REPO/$IMAGE_NAME:$IMAGE_TAG
 ```
 
+![19](https://github.com/user-attachments/assets/409da364-4a03-4aab-ab2e-a08470b4f431)
+
 
 ## Create the Cloud Run Job
 
@@ -612,10 +608,9 @@ Now I have two orchestrators:
 
 Airflow (Composer) for the main DAG.
 
-Cloud Run Job + Scheduler for an alternative/backup runner.
+Cloud Run Job + Scheduler (if needed) for an alternative/backup runner.
 
 I can use one or both as needed.
-
 
 
 # Sum up until here
@@ -658,9 +653,6 @@ gcloud pubsub topics create billing-alerts --project="$PROJECT_ID"
 ```
 
 ### Grant the Budget service Publisher on the topic
-```bash 
-
-```
 
 The Budget service needs permission to publish into the billing topic with role of pub/sub publisher.
 
