@@ -12,47 +12,6 @@ Data Validation: Uses hash comparisons to ensure data integrity.
 Monitoring and Alerting: Includes logging to GCS and email alerts for proactive monitoring.
 Orchestration: Utilizes Apache Airflow for scheduling, task dependencies, and error handling.
 
-## Table of Contents
-
-- [Data pipeline summary](#data-pipeline-summary)
-  - [End-to-end flow](#end-to-end-flow)
-  - [Bronze](#bronze)
-  - [Silver](#silver)
-  - [Gold](#gold)
-- [Storage & control artifacts (GCS)](#storage--control-artifacts-gcs)
-- [Operational characteristics](#operational-characteristics)
-  - [Reliability](#reliability)
-  - [Observability](#observability)
-- [Architecture (Medallion)](#architecture-medallion)
-  - [GCS Paths](#gcs-paths)
-- [Big Query Interface](#big-query-interface)
-  - [DDL – DATASET](#ddl---dataset)
-    - [BRONZE](#bronze-1)
-    - [SILVER](#silver-1)
-    - [GOLD](#gold-1)
-    - [Gold Sample](#gold-sample)
-- [Dataplex](#dataplex)
-- [How to deploy & run](#how-to-deploy--run)
-  - [Service Account](#service-account)
-  - [Creating the Composer environment](#creating-the-composer-environment)
-  - [Install PyPI packages (either via UI → Packages PyPI or CLI)](#install-pypi-packages-either-via-ui--packages-pypi-or-cli)
-    - [exact pins that worked in this project](#exact-pins-that-worked-in-this-project)
-    - [Airflow Variables (UI → Admin → Variables)](#airflow-variables-ui--admin--variables)
-  - [Configuring the Google Cloud Storage buckets (layout)](#configuring-the-google-cloud-storage-buckets-layout)
-- [Containerizing the ETL (Cloud Run Jobs)](#containerizing-the-etl-cloud-run-jobs)
-  - [Dockerfile (project root)](#dockerfile-project-root)
-  - [Build & push (Artifact Registry)](#build--push-artifact-registry)
-  - [Create the Cloud Run Job](#create-the-cloud-run-job)
-  - [Scheduling the Cloud Run Job (Cloud Scheduler)](#scheduling-the-cloud-run-job-cloud-scheduler)
-- [Pub Sub and Billing Budgets Alerts](#pub-sub-and-billing-budgets-alerts)
-  - [Create the Pub/Sub topic (CLI)](#create-the-pubsub-topic-cli)
-  - [Grant the Budget service Publisher on the topic](#grant-the-budget-service-publisher-on-the-topic)
-  - [Point a Budget to the topic](#point-a-budget-to-the-topic)
-  - [Reports](#reports)
-- [Looker](#looker)
-- [References](#references)
-
-
 ## End-to-end flow
 
 ```mermaid
@@ -102,6 +61,48 @@ flowchart LR
     class B,S,G,CTRL,LOGS store;
     class T1,T2,T3 store;
 ```
+
+
+## Table of Contents
+
+- [Data pipeline summary](#data-pipeline-summary)
+  - [End-to-end flow](#end-to-end-flow)
+  - [Bronze](#bronze)
+  - [Silver](#silver)
+  - [Gold](#gold)
+- [Storage & control artifacts (GCS)](#storage--control-artifacts-gcs)
+- [Operational characteristics](#operational-characteristics)
+  - [Reliability](#reliability)
+  - [Observability](#observability)
+- [Architecture (Medallion)](#architecture-medallion)
+  - [GCS Paths](#gcs-paths)
+- [Big Query Interface](#big-query-interface)
+  - [DDL – DATASET](#ddl---dataset)
+    - [BRONZE](#bronze-1)
+    - [SILVER](#silver-1)
+    - [GOLD](#gold-1)
+    - [Gold Sample](#gold-sample)
+- [Dataplex](#dataplex)
+- [How to deploy & run](#how-to-deploy--run)
+  - [Service Account](#service-account)
+  - [Creating the Composer environment](#creating-the-composer-environment)
+  - [Install PyPI packages (either via UI → Packages PyPI or CLI)](#install-pypi-packages-either-via-ui--packages-pypi-or-cli)
+    - [exact pins that worked in this project](#exact-pins-that-worked-in-this-project)
+    - [Airflow Variables (UI → Admin → Variables)](#airflow-variables-ui--admin--variables)
+  - [Configuring the Google Cloud Storage buckets (layout)](#configuring-the-google-cloud-storage-buckets-layout)
+- [Containerizing the ETL (Cloud Run Jobs)](#containerizing-the-etl-cloud-run-jobs)
+  - [Dockerfile (project root)](#dockerfile-project-root)
+  - [Build & push (Artifact Registry)](#build--push-artifact-registry)
+  - [Create the Cloud Run Job](#create-the-cloud-run-job)
+  - [Scheduling the Cloud Run Job (Cloud Scheduler)](#scheduling-the-cloud-run-job-cloud-scheduler)
+- [Pub Sub and Billing Budgets Alerts](#pub-sub-and-billing-budgets-alerts)
+  - [Create the Pub/Sub topic (CLI)](#create-the-pubsub-topic-cli)
+  - [Grant the Budget service Publisher on the topic](#grant-the-budget-service-publisher-on-the-topic)
+  - [Point a Budget to the topic](#point-a-budget-to-the-topic)
+  - [Reports](#reports)
+- [Looker](#looker)
+- [References](#references)
+
 
 ### **Bronze** 
 The DAG paginates the API (per_page=200) and iterates until an empty page is returned—so all pages are fetched, not just page 1. The full snapshot is serialized to a single UTF-8 NDJSON and written to GCS, plus a timestamped archive copy.
