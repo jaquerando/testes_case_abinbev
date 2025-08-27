@@ -154,13 +154,9 @@ Fetches all pages from the API (pagination, per_page=200).
 Writes a single NDJSON file (UTF-8, ensure_ascii=False) to GCS.
 
 Computes a SHA256 of the NDJSON and keeps a checkpoint in GCS.
+
 Silver/Gold only run if the hash changed (incremental gate).
 
-Force run options:
-
-Airflow Variable bees_force=true, or
-
-Trigger with run config {"force": true}.
 
 ## GCS Paths
 
